@@ -28,11 +28,16 @@ public class PlayerController : MonoBehaviour
 
     public bool isKnockback;
 
+    private GameManager gameManager;
+    private AudioManager audioManager;
+
     private Rigidbody2D rb;
     private void Awake()
     {
         animator = GetComponent<Animator>();
         rb = GetComponent<Rigidbody2D>();
+        gameManager = FindAnyObjectByType<GameManager>();
+        audioManager = FindAnyObjectByType<AudioManager>();
     }
     void Start()
     {
@@ -45,6 +50,7 @@ public class PlayerController : MonoBehaviour
     }
     void FixedUpdate()
     {
+        if (gameManager.IsPaused() || gameManager.IsGameOver() || gameManager.IsGameWin()) return;
         HandleMovement();
         HandleJump();
         HandLeRun();
@@ -106,6 +112,7 @@ public class PlayerController : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.Space) && isGrounded && !isAttacking && !isDefending)
         {
+            audioManager.PlayJumpSound();
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
         }
         isGrounded = Physics2D.OverlapCircle(groundCheck.position, 0.2f, groundLayer);
@@ -141,12 +148,15 @@ public class PlayerController : MonoBehaviour
             {
                 case 1:
                     animator.SetTrigger("Attack1");
+                    audioManager.PlayAttackOneSound();
                     break;
                 case 2:
                     animator.SetTrigger("Attack2");
+                    audioManager.PlayAttackTwoSound();
                     break;
                 case 3:
                     animator.SetTrigger("Attack3");
+                    audioManager.PlayAttackThreeSound();
                     ResetCombo();
                     break;
             }
@@ -176,19 +186,27 @@ public class PlayerController : MonoBehaviour
 
     public void TakeDamage(int amount, Transform enemyTransform = null)
     {
-        animator.SetTrigger("Hurt");
+        if (health <= 0) return;
+
         health -= amount;
+        health = Mathf.Clamp(health, 0, maxHealth);
+
+        gameManager.UpdateHealth();
+
+        animator.SetTrigger("Hurt");
+        audioManager.PlayHurtSound();
 
         if (health <= 0)
         {
-            health = 0;
             Die();
         }
     }
 
-    private void Die()
+
+    public void Die()
     {
         animator.SetBool("isDeath", true);
+        audioManager.PlayDeathSound();
 
         rb.linearVelocity = Vector2.zero;
         rb.gravityScale = 0f;
@@ -201,13 +219,20 @@ public class PlayerController : MonoBehaviour
         StartCoroutine(PlayerDeathRoutine());
     }
 
-    private IEnumerator PlayerDeathRoutine()
+    private IEnumerator PlayerDeathRoutine() // hien thuc hoa cai chet cua player
     {
         yield return new WaitForSeconds(2f);
-        Time.timeScale = 0f; // Tạm dừng trò chơi
+        gameManager.GameOver();
+    }
 
-        // (Tùy chọn) Hiện menu Game Over
-        // gameOverUI.SetActive(true);
+    public void Heal(int amount)
+    {
+        if (health <= 0) return;
+
+        health += amount;
+        health = Mathf.Clamp(health, 0, maxHealth);
+
+        gameManager.UpdateHealth();
     }
 
     private void HandleKnockback()

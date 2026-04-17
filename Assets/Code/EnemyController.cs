@@ -5,27 +5,34 @@ using System.Collections;
 public class EnemyController : MonoBehaviour
 {
     [SerializeField] private float speed = 3f;
-    [SerializeField] private LayerMask checkEnemy;
+    [SerializeField] private LayerMask groundLayer;
     [SerializeField] private Transform groundCheck; // kiem tra mat dat
     [SerializeField] private Transform wallCheck; // kiem tra tuong
     [SerializeField] private float groundCheckDistance = 1f; // khoang cach kiem tra mat dat
     [SerializeField] private float wallCheckDistance = 1f; // khoang cach kiem tra tuong
 
-    [SerializeField] private Transform player; // tham chieu den player
+    //[SerializeField] private Transform player;
+    private PlayerController player; // tham chieu den player
     [SerializeField] private float chaseRange = 3f; // khoang cach de phat hien player
     [SerializeField] private float attackRange = 2f; // khoang cach de tan cong player
 
     private Animator animator;
     private Rigidbody2D rb;
+    private AudioManager audioManager;
+    private GameManager gameManager;
 
     private bool movingRight = true;
     private bool isGroundAhead;
     private bool isWallAhead;
 
+    private float flipCooldown = 0.2f;
+    private float flipTimer = 0f;
+
     public enum EnemyType
     {
         Boar,
-        SmallBee
+        SmallBee,
+        Slime
     }
     [SerializeField] private EnemyType enemyType;
 
@@ -45,6 +52,8 @@ public class EnemyController : MonoBehaviour
     public int maxHealth = 10;
     private void Awake()
     {
+        gameManager = FindAnyObjectByType<GameManager>();
+        audioManager = FindAnyObjectByType<AudioManager>();
         animator = GetComponent<Animator>();
         rb = GetComponent<Rigidbody2D>();
     }
@@ -55,6 +64,8 @@ public class EnemyController : MonoBehaviour
 
     void Update()
     {
+        FindNearestPlayer();
+
         if (isKnockback)
         {
             knockbackCouter -= Time.deltaTime;
@@ -65,22 +76,9 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        float distanceToPlayer = Vector2.Distance(transform.position, player.position);
+        CheckPlayerDistance();
 
-        if (distanceToPlayer <= attackRange)
-        {
-            currentState = EnemyState.Attack;
-        }
-        else if (distanceToPlayer <= chaseRange)
-        {
-            currentState = EnemyState.Chase;
-        }
-        else
-        {
-            currentState = EnemyState.Patrol;
-        }
-
-        switch(currentState)
+        switch (currentState)
         {
             case EnemyState.Patrol:
                 Patrol();
@@ -88,27 +86,53 @@ public class EnemyController : MonoBehaviour
             case EnemyState.Chase:
                 Chase();
                 break;
-            case EnemyState.Attack:
-                Attack();
-                break;
+            //case EnemyState.Attack:
+            //    Attack();
+            //    break;
         }
+
+        flipTimer -= Time.deltaTime;
     }
+
+    private void FindNearestPlayer()
+    {
+        PlayerController[] players = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        float minDistance = Mathf.Infinity;
+        PlayerController nearest = null;
+
+        foreach (var p in players)
+        {
+            float dist = Vector2.Distance(transform.position, p.transform.position);
+            if (dist < minDistance)
+            {
+                minDistance = dist;
+                nearest = p;
+            }
+        }
+
+        player = nearest;
+    }
+
 
     private void Patrol() // di chuyen ke dich
     {
         if (groundCheck != null)
         {
-            isGroundAhead = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, checkEnemy); // kiem tra mat dat
+            isGroundAhead = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, groundLayer); // kiem tra mat dat
         }
 
         Vector2 wallDir = movingRight ? Vector2.right : Vector2.left;
-        isWallAhead = Physics2D.Raycast(wallCheck.position, wallDir, wallCheckDistance, checkEnemy);// kiem tra tuong
+        isWallAhead = Physics2D.Raycast(wallCheck.position, wallDir, wallCheckDistance, groundLayer);// kiem tra tuong
 
         if (enemyType == EnemyType.Boar)
         {
             if (!isGroundAhead || isWallAhead)
             {
-                Flip();
+                if (flipTimer <= 0)
+                {
+                    Flip();
+                    flipTimer = flipCooldown; // ngăn flip liên tục
+                }
             }
 
             float moveDir = movingRight ? 1f : -1f;
@@ -116,11 +140,15 @@ public class EnemyController : MonoBehaviour
             animator.SetBool("isWalk", true);
             animator.SetBool("isRun", false);
         }
-        else if (enemyType == EnemyType.SmallBee)
+        else if (enemyType == EnemyType.Slime)
         {
-            if (isWallAhead)
+            if (!isGroundAhead || isWallAhead)
             {
-                Flip();
+                if (flipTimer <= 0)
+                {
+                    Flip();
+                    flipTimer = flipCooldown; // ngăn flip liên tục
+                }
             }
             float moveDir = movingRight ? 1f : -1f;
             rb.linearVelocity = new Vector2(moveDir * speed, rb.linearVelocity.y);
@@ -129,13 +157,15 @@ public class EnemyController : MonoBehaviour
 
     private void Chase()
     {
-        if (player.position.x > transform.position.x && !movingRight)
+        if (player.transform.position.x > transform.position.x && !movingRight) 
         {
             Flip();
+            audioManager.PlayEnemyAttackSound();
         }
-        else if (player.position.x < transform.position.x && movingRight)
+        else if (player.transform.position.x < transform.position.x && movingRight)
         {
             Flip();
+            audioManager.PlayEnemyAttackSound();
         }
 
         float moveDir = movingRight ? 1f : -1f;
@@ -149,21 +179,47 @@ public class EnemyController : MonoBehaviour
         }
     }
 
-    private void Attack()
+    //private void Attack()
+    //{
+    //    rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+    //    if (enemyType == EnemyType.SmallBee)
+    //    {
+    //        animator.SetTrigger("Attack");
+    //    }
+    //}
+
+    private void CheckPlayerDistance()
     {
-        rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
-        if (enemyType == EnemyType.SmallBee)
+        if (player == null) return;
+
+        float distanceToPlayer = Vector2.Distance(transform.position, player.transform.position);
+
+        if (distanceToPlayer <= attackRange)
         {
-            animator.SetTrigger("Attack");
+            currentState = EnemyState.Attack;
+        }
+        else if (distanceToPlayer <= chaseRange)
+        {
+            currentState = EnemyState.Chase;
+        }
+        else
+        {
+            // Nếu đang chase mà mất player => quay trở về Patrol
+            if (currentState == EnemyState.Chase || currentState == EnemyState.Attack)
+            {
+                currentState = EnemyState.Patrol;
+                Flip(); // Đổi hướng đi khi không thấy player
+            }
         }
     }
+
 
     public void StartKnockback()
     {
         isKnockback = true;
         knockbackCouter = knockbackTotalTime;
         currentState = EnemyState.Patrol;
-        float direction = (player.position.x > transform.position.x) ? -1f : 1f;
+        float direction = (player.transform.position.x > transform.position.x) ? -1f : 1f;
         rb.linearVelocity = new Vector2(direction * knockbackForce, rb.linearVelocity.y);
         if (enemyType == EnemyType.Boar)
         {
@@ -174,7 +230,10 @@ public class EnemyController : MonoBehaviour
 
     public void TakeDamage(int damage, Transform playerTransform = null)
     {
-        animator.SetTrigger("Hit");
+        if (enemyType == EnemyType.Boar)
+        {
+            animator.SetTrigger("Hit");
+        }
         health -= damage;
 
         if (health <= 0)
@@ -185,10 +244,26 @@ public class EnemyController : MonoBehaviour
 
     private void Die()
     {
+        if (enemyType == EnemyType.Boar)
+        {
+            animator.SetTrigger("Hit");
+            audioManager.PlayEnemyDeathSound();
+        }
         rb.linearVelocity = Vector2.zero;
-        enabled = false;
+        rb.gravityScale = 0f;
+        rb.constraints = RigidbodyConstraints2D.FreezePosition;
+        this.enabled = false;
+
         BoxCollider2D col = GetComponent<BoxCollider2D>();
         if (col != null) col.enabled = false;
+        gameManager.AddScore(5);
+
+        StartCoroutine(EnemyDeathRoutine());
+    }
+
+    private IEnumerator EnemyDeathRoutine()
+    {
+        yield return new WaitForSeconds(0.5f);
         Destroy(gameObject);
     }
 

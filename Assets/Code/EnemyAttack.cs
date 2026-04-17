@@ -5,9 +5,11 @@ public class EnemyAttackZone : MonoBehaviour
 {
     private EnemyController enemy;
     public int damage = 2;
+    private AudioManager audioManager;
     private void Awake()
     {
         enemy = GetComponentInParent<EnemyController>();
+        audioManager = FindAnyObjectByType<AudioManager>();
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -23,6 +25,7 @@ public class EnemyAttackZone : MonoBehaviour
                 if (player.isDefending && isBlocking)
                 {
                     enemy.StartKnockback();
+                    audioManager.PlayDefendSound();
                     return;
                 }
                 player.knockbackCouter = player.knockbackTotalTime;
